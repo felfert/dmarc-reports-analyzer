@@ -12,7 +12,7 @@ try {
 
 // if table doesn't exist, create one
 if ($dbc->query('show tables LIKE \'report\'')->fetch() === false) {
-    logMessage('Table report doesn\'t exist... Creating...');
+    logMessage(False, 'Table report doesn\'t exist... Creating...');
     if (!createTableReport()) {
         die('Couldn\'t create table \'report\'.');        
     }
@@ -20,7 +20,7 @@ if ($dbc->query('show tables LIKE \'report\'')->fetch() === false) {
 
 // if table doesn't exist, create one
 if ($dbc->query('show tables LIKE \'rptrecord\'')->fetch() === false) {
-    logMessage('Table rptrecord doesn\'t exist... Creating...');
+    logMessage(False, 'Table rptrecord doesn\'t exist... Creating...');
     if (!createTableRptrecord()) {
         die('Couldn\'t create table \'rptrecord\'.');        
     }
@@ -29,9 +29,9 @@ if ($dbc->query('show tables LIKE \'rptrecord\'')->fetch() === false) {
 set_time_limit(0); 
 /* try to connect */
 $hostname = '{' . $host . '}' . $folderInbox;
-
+logMessage(False, 'Opening IMAP connection...');
 $inbox = imap_open($hostname,$username,$password) or die('Cannot connect to Email: ' . imap_last_error());
-
+logMessage(False, 'Searching IMAP...');
 $emails = imap_search($inbox, 'ALL');
 
 /* if any emails found, iterate through each email */
@@ -48,10 +48,10 @@ if($emails) {
 
         /* get information specific to this email */
         $overview = imap_fetch_overview($inbox,$email_number,0);
-        logMessage('Processing message...  Subject:"' . $overview[0]->subject . '"');
+        logMessage(False, 'Processing message...  Subject:"' . $overview[0]->subject . '"');
         //$message = imap_fetchbody($inbox,$email_number,2);
 
-        /* get mail structure */
+        /* get mail structure */ 
         $structure = imap_fetchstructure($inbox, $email_number);
         //var_dump($structure);
         $attachments = array();
@@ -91,7 +91,7 @@ if($emails) {
         if($attachments['body']['is_attachment']) 
         {
             $attachments['body']['attachment'] = imap_fetchbody($inbox, $email_number,1);
-            
+
             /* 3 = BASE64 encoding */
             if($structure->encoding == 3) 
             { 
@@ -160,7 +160,7 @@ if($emails) {
         /* iterate through each attachment */
         foreach($attachments as $attachment)
         {
-            if($attachment['is_attachment'] == 1)
+            if($attachment['is_attachment'] == 1) 
             {
                 $filename = $attachment['name'];
                 if(empty($filename)) $filename = $attachment['filename'];
@@ -171,14 +171,14 @@ if($emails) {
                      mkdir($folder);
                 }
 
-                logMessage('  Processing attachment: ' . $filename);
+                logMessage(True, '  Processing attachment: ' . $filename);
 
-                if (preg_match('/.zip$/i',$filename)) {
+                if (preg_match('/\.zip$/i',$filename)) {
                     // ******************* ZIP FILE *******************
                     $fp = fopen("./". $folder ."/". $email_number . "-" . $filename, "w+");
                     fwrite($fp, $attachment['attachment']);
                     fclose($fp);
-                    
+
                     $zip = new ZipArchive;
                     $zip->open('./' . $folder . '/' . $email_number . '-' . $filename);
                     $xmlFilename = $zip->getNameIndex(0);
@@ -186,32 +186,39 @@ if($emails) {
                     $xmlRaw = file_get_contents('zip://' . realpath('./' . $folder . '/' . $email_number . '-' . $filename) . '#' . $xmlFilename);
                     $xml = simplexml_load_string($xmlRaw);
                     unlink('./' . $folder . '/' . $email_number . '-' . $filename);
-                } elseif(preg_match('/.gz$/i',$filename)) {
+                } elseif(preg_match('/\.gz(ip)?$/i',$filename)) {
                     // ******************* GZIP FILE *******************
                     $xmlRaw = gzdecode($attachment['attachment']);
                     $xml = simplexml_load_string($xmlRaw);
                 } else {
-                    logMessage('    Unknown attachment ' . $filename . ' skipping...');
+                    logMessage(True, '    Unknown attachment ' . $filename . ' skipping...');
                     continue;
                 }
                 if ($xml === false) {
-                    logMessage('    Xml load failed attachment ' . $filename . ' skipping...');
+                    logMessage(True, '    Xml load failed attachment ' . $filename . ' skipping...');
                     continue;
                 }
+
+                $setflag = imap_setflag_full($inbox, $email_number, "\\Seen");
                 $xmlData = readXmlData($xml);
+
+                logMessage(False, '    Update flag to SEEN: ' . ($setflag ? 'succeeded' : 'FAILED!'));
+
                 storeXmlData($xmlData,$xmlRaw);
             }
         }
-        if (imap_mail_move($inbox,$email_number,$folderProcessed)) {
-            imap_expunge($inbox);
-        }
+
+        // Instead, we'll just mark it as seen and move along (above)...
+        //if (imap_mail_move($inbox, $email_number, $folderProcessed)) {
+        //    imap_expunge($inbox);
+        //}
     }
 } 
 
 /* close the connection */
 imap_close($inbox);
 
-logMessage('done.');
+logMessage(False, 'Done.');
 
 function readXmlData($xml) {
     $xmlData['dateFrom'] = (int)$xml->report_metadata->date_range->begin;
@@ -236,7 +243,7 @@ function readXmlData($xml) {
         $xmlData['record'][$recordRow]['spf_align'] = (string)$record->row->policy_evaluated->spf;
         $xmlData['record'][$recordRow]['hfrom'] = (string)$record->identifiers->header_from;
         $dkimDomain = $dkimResult = $dkimSelector = '';
-        foreach ($record->auth_results->dkim as $dkim) {
+        foreach ($record->auth_results->dkim as $dkim) { 
             $dkimDomain .= (string)$dkim->domain . '/';
             $dkimResult .= (string)$dkim->result . '/';
             $dkimSelector .= (string)$dkim->selector . '/';
@@ -259,7 +266,7 @@ function storeXmlData($xmlData,$xmlRaw) {
     $parametersCheck[] = $xmlData['domain'];
     $queryCheck->execute($parametersCheck);
     if ($queryCheck->fetch()) {
-        logMessage('    Report already exists. reportId: ' . $xmlData['reportId'] . ' domain: ' . $xmlData['domain'] . ' skipping...');
+        logMessage(True, '    Report already exists. reportId: ' . $xmlData['reportId'] . ' domain: ' . $xmlData['domain'] . ' skipping...');
         return;
     }
 
@@ -280,7 +287,7 @@ function storeXmlData($xmlData,$xmlRaw) {
     $parametersReport[] = (strlen($xmlData['policy_pct']) > 0) ? $xmlData['policy_pct'] : NULL;
     $parametersReport[] = base64_encode(gzencode($xmlRaw));
     if (!$queryReport->execute($parametersReport)) {
-        logMessage('INSERT INTO report failed. VALUES: ' . json_encode($parametersReport));
+        logMessage(False, 'INSERT INTO report failed. VALUES: ' . json_encode($parametersReport));
         return;
     }
     $serial = $dbc->lastInsertId();
@@ -294,7 +301,7 @@ function storeXmlData($xmlData,$xmlRaw) {
             $record['ip'] = inet_pton($record['ip']);
             $iptype = 'ip6';
         } else {
-            logMessage('Invalid IP address: ' . $record['ip']);
+            logMessage(False, 'Invalid IP address: ' . $record['ip']);
             continue;
         }
         $queryReportRecord = $dbc->prepare('INSERT INTO rptrecord(serial,' . $iptype . ',rcount,disposition,spf_align,dkim_align,dkimdomain,dkimresult,spfdomain,spfresult,identifier_hfrom)
@@ -320,7 +327,7 @@ function storeXmlData($xmlData,$xmlRaw) {
         $parametersReportRecord[] = $record['spfResult'];
         $parametersReportRecord[] = $record['hfrom'];
         if (!$queryReportRecord->execute($parametersReportRecord)) {
-            logMessage('INSERT INTO rptrecord failed. VALUES: ' . json_encode($parametersReportRecord));
+            logMessage(False, 'INSERT INTO rptrecord failed. VALUES: ' . json_encode($parametersReportRecord));
         }
     }
 }
@@ -345,7 +352,7 @@ function createTableReport() {
         PRIMARY KEY (`serial`),
         UNIQUE KEY `domain` (`domain`,`reportid`),
         KEY `maxdate` (`maxdate`)
-        ) AUTO_INCREMENT=1');
+        ) AUTO_INCREMENT=1 ROW_FORMAT=DYNAMIC');
     if ($result){
         return true;
     } else {
@@ -373,7 +380,7 @@ function createTableRptrecord() {
         KEY `serial` (`serial`,`ip`),
         KEY `serial6` (`serial`,`ip6`),
         KEY `hfrom-spf-dkim` (`identifier_hfrom`,`spf_align`,`dkim_align`)
-        )");
+        ) ROW_FORMAT=DYNAMIC");
     if ($result){
         return true;
     } else {
@@ -381,8 +388,8 @@ function createTableRptrecord() {
     }
 }
 
-function logMessage($message) {
-    echo($message . PHP_EOL);
+function logMessage($echo, $message) {
+    if($echo) echo($message . PHP_EOL);
     file_put_contents('./import.log',$message . PHP_EOL,FILE_APPEND);
 }
 
